@@ -1,0 +1,1882 @@
+###### f_00_Arch_amd64-openboxBASE.plug version 6.0.0-r5
+# Revision Date: 15Feb2023
+# Copyright wiak (William McEwan) 30 May 2019+; Licence MIT (aka X11 license)
+#    for use with build_firstrib_rootfs_XXX.sh to build:
+# ./build_firstrib_rootfs.sh arch default amd64 f_00_Arch_amd64-openboxBASE_jgmenu_600r5.plug:
+# /usr/lib/modules/6.4.7-arch1-1/kernel/drivers/pci/controller/vmd.ko 
+
+# Full(ish) X desktop exemplar for Arch Linux firstrib_rootfs ready for booting
+# After using FR wiak initrd, login with user:root password:root
+# Enter wifi details as needed, and then enter command startx if needed - wiak remove: need to fix some boot details maybe...
+# For package ideas, you can refer for example to:
+# https://wiki.archlinux.org/index.php/List_of_applications
+# NOTE that all commandlines in this plugin will be executed within the build chroot.
+
+# Some clean up from previous runs in case build_firstrib_rootfs or
+# make00<distro>XXX being re-run to fetch packages that failed owing
+# to repo timeouts or whatever (wiak remove: this and some other tweaks in script below may not be enough to guarantee correct second run - not sure):
+[ -d /etc/skel ] && rm -rf /etc/skel
+userdel -f firstrib
+[ -d /home/firstrib ] && rm -rf /home/firstrib
+userdel -f spot
+[ -d /home/spot ] && rm -rf /home/spot
+
+### START package manager install---------------------------------------
+# Note ESSENTIAL; need full wget since busybox wget can't handle https
+pacman -Syu
+echo wget \
+| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+
+## EXPERIMENTAL: Force pacman to use wget -c rather than it's default mode to make more robust against timeouts - wiak remove NO LONGER SEEMS TO WORK SO COMMENTING OUT
+#if ! grep -q '^XferCommand = /usr/bin/wget' /etc/pacman.conf; then
+# sed -i '/XferCommand = \/usr\/bin\/wget/a XferCommand = /usr/bin/wget --passive-ftp -c -O %o %u' /etc/pacman.conf
+#fi
+
+## install some MAIN packages including wpa_supplicant and busybox for wifi connectivity
+# PROBABLY BEST TO TREAT AS ESSENTIAL
+echo tzdata systemd-timesyncd systemd-sysvcompat dosfstools mtools procps-ng which wpa_supplicant busybox giblib ntfs-3g light \
+| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+
+# Make some network-related applet symlinks for above busybox
+cd /usr/bin; ln -s busybox ash; ln -s /usr/lib/systemd/systemd init  # wiak remove: recently seemed to need this link to systemd
+# Hopefully not required...: ln -s busybox ip; ln -s busybox route; ln -s busybox ifconfig; ln -s busybox ping; ln -s busybox udhcpc;
+cd ../..
+
+## install OPTIONAL KERNEL/MODULES/FIRMWARE
+# NOTE: leave linux and linux-firmware out for huge kernel builds such as kernel from KLV-Airedale:
+# When pacman installs linux this scripts uses default mkinitcpio option
+# Also provides modules optionally required by later FirstRib initramfs build
+#echo linux linux-firmware sof-firmware \
+#| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+echo sof-firmware \
+| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+
+# Ignore kernel upgrade during future pacman -Syu
+# Note: if desired to upgrade kernel+related-modules you also have to do change the modules used by initrd as well.
+# Easy if using huge kernel KLV-type mechanism though - otherwise need to uncompress/recompress initrd
+# Surrounding such sed lines with if check, so only done once if script re-run - wiak: to check such measures throughout script
+if ! grep -q 'IgnorePkg = linux' /etc/pacman.conf; then
+  sed -i '/#IgnorePkg/ a IgnorePkg = linux' /etc/pacman.conf
+fi
+
+## install NON-GUI APPS SELECTION
+# Changing this selection may require you to also edit desktop apps menu
+# PROBABLY BEST TO TREAT AS ESSENTIAL
+# Changelog from rc2; user can optionally re-install: removed base-devel net-tools
+# nitrogen (установка обоев) для терминала zsh (zsh-autosuggestions zsh-syntax-highlighting) netpbm(peasyglue) xournalpp(не устанавливать)
+# gcolor3 gpick(выбора цвета пипетка) 
+echo sudo xdg-utils pciutils cpio unzip zstd iproute2 file exfatprogs \
+squashfs-tools usleep usbutils gettext sbxkb \
+alsa-utils pulseaudio pulseaudio-alsa bluez bluez-utils pulseaudio-bluetooth \
+xfce4-power-manager pulseaudio-equalizer-ladspa lxhotkey-gtk3 galculator gpick cdrtools \
+translate-shell gwget uget zps gmtp lshw tcpdump p7zip jq \
+libpng12 libwebp webp-pixbuf-loader librsvg libnewt libisoburn \
+dialog convmv rsync lsof wmctrl netpbm \
+libjpeg6-turbo wireless_tools iw \
+aspell-en sane sxiv nano scrot \
+networkmanager network-manager-applet \
+git cmake avahi nss-mdns python-dbus dbus-glib v4l-utils dpkg btop \
+| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+
+## install and configure XORG related components
+#  xf86-video-intel got rid of boot delay for me, but only worked with native resolution and sometimes hung
+echo xorg xorg-xinit gxmessage xorg-xmessage \
+| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+if [ ! -e ~/.xinitrc ]; then
+  sed -i '/xterm/d;/xclock/d' /etc/X11/xinit/xinitrc  # remove startup xterms/xclock
+  cp /etc/X11/xinit/xinitrc ~/.xinitrc    # into root home dir for editing
+fi
+# ~/.Xresources for larger xterm uxterm fonts
+cat <<'XRESOURCES' > ~/.Xresources
+Xft*antialias: true
+Xft*autohint: true
+XTerm*background: black
+XTerm*foreground: grey
+XTerm*cursorColor: grey
+XTerm.vt100.geometry: 95x25+150
+XTerm.vt100.scrollBar: true
+XTerm.vt100.scrollbar.width: 8
+XTerm*faceName: Monospace Regular 
+XTerm*faceSize: 9
+
+UXft*antialias: true
+UXft*autohint: true
+UXTerm*background: #002b36
+UXTerm*foreground: #839496
+UXTerm*cursorColor: grey
+UXTerm.vt100.geometry: 84x25+150
+UXTerm*faceName: Monospace Regular 
+UXTerm*faceSize: 8
+XRESOURCES
+
+## Create /root/ directories
+#
+mkdir -p /root/Desktop
+mkdir -p /root/Documents
+mkdir -p /root/Downloads
+mkdir -p /root/Music
+mkdir -p /root/my-applications
+mkdir -p /root/Pictures
+mkdir -p /root/Public
+mkdir -p /root/Startup
+mkdir -p /root/Templates
+mkdir -p /root/Videos
+
+## install DESKTOP MANAGER
+#  currently using OPENBOX/TINT2 for bottom panel + related extras: 
+# currently using jgmenu rather than archlinux-xdg-menu, but leaving available
+echo openbox archlinux-xdg-menu tint2 jgmenu ttf-dejavu xdotool \
+| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+
+## install EXTRA APPS GUI-MAINLY SELECTION
+# Changing this selection may require you to also edit desktop apps menu
+# SIMPLY REMOVE/ADD TO SUIT YOUR SYSTEM DESIRE (e.g. change browser and so on)
+# First remove any pre-created busybox/iproute2 symlinks in case they conflict with any installed network(manager) packages below
+# Not required as things stand though: rm -f /usr/bin/ip /usr/bin/route /usr/bin/ifconfig /usr/bin/ping /usr/bin/udhcpc
+# pacutils and perl extras are dependencies for trizen AUR helper install (trizen installed later via tar.zst package file)
+# Changelog from rc2; user can optionally re-install: removed lightdm lightdm-gtk-greeter speedcrunch osmo epdfview gftp transmission-gtk 
+# Changelog from rc2; user can optionally re-install: removed  gvfs-gphoto2 gvfs-afc gvfs-nfs gvfs-smb gvfs-google xfburn xarchiver chromium 
+# conky conky-manager (gnome-packagekit (менеджер пакетов) 
+# pacutils perl-data-dump perl-json perl-libwww perl-lwp-protocol-https perl-term-readline-gnu perl-term-ui (для trizen)
+# geeqie (програма просмотра изображений) l3afpad(текстовый редактор)
+# mbedtls2 (GTKHash-sum) eolie (browser) blueman(Bluetooth) screener-1.0.1(xautolock, xlockmore) gtk-layer-shell(для gtkdialog)
+# font-manager,gucharmap (управление шрифтами)
+pacman -Syu
+echo pavucontrol xclip xdialog \
+xterm yad pcmanfm tldr neofetch \
+lxterminal lxtask lxrandr leafpad geany mtpaint \
+gparted xcompmgr bleachbit syslinux \
+samba smbclient cifs-utils nbtscan arp-scan beep \
+gvfs gvfs-smb gvfs-mtp gpard \
+python-gobject cherrytree \
+screenfetch gnome-screenshot pacman-contrib \
+lxappearance lxappearance-obconf \
+mpv smplayer blueman \
+xautolock xlockmore gtk-layer-shell \
+gtk-engine-murrine openssl-1.1 \
+ristretto gst-libav gst-plugins-good \
+| xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+
+# NOTE In practice neither hardinfo gdmap appear to be available any more
+# in Arch official repos so will thus install either or both via other mechanism
+
+## OPTIONAL For my own setup I may also install
+# echo gimp inkscape python-kivy \
+# qt5-base qt5-svg qt5-imageformats qt5ct \
+# hplip xsane simple-scan tesseract \
+# ocrfeeder gimagereader-gtk okular nomacs libreoffice-fresh tigervnc virtualgl \
+# nm-connection-editor cups-pdf \
+# | xargs -n1 pacman -S --noconfirm --needed --disable-download-timeout
+### END package manager install-----------------------------------------
+
+### START GENERAL CONFIGURATION-----------------------------------------
+pwconv # set up passwd system
+grpconv
+# Quietly set default root passwd to "root"
+printf "root\nroot" | passwd root >/dev/null 2>&1
+
+## START config systemd, basic wifi, X, Desktop, and sound--------------
+
+# Create systemd override to achieve root autologin (per Arch Wiki)
+# Remove this section if not wanting autologin of root
+mkdir -p /etc/systemd/system/getty@tty1.service.d/
+cat <<'AUTOLOGIN' >/etc/systemd/system/getty@tty1.service.d/override.conf
+[Service]
+ExecStart=
+ExecStart=-/usr/bin/agetty --autologin root --noclear %I $TERM
+AUTOLOGIN
+
+# Disable following service if you want to use alternative network manager
+cat <<'WIAKWIFISYSD' >/usr/lib/systemd/system/wiakwifi.service
+[Unit]
+Description=wiakwifi internet connect service
+Wants=network.target
+BindsTo=network-pre.target dbus.service
+After=network-pre.target dbus.service
+Before=network.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wiakwifi
+RemainAfterExit=yes
+TimeoutSec=35
+[Install]
+WantedBy=multi-user.target
+WIAKWIFISYSD
+# Commented out to not enable wiakwifi since using NetworkManager instead:
+# systemctl enable wiakwifi
+systemctl enable NetworkManager
+
+# Arrange to startx in user's .bash_profile (per Arch Wiki)
+# Remove this section if not wanting boot straight into X
+touch ~/.bash_profile
+if ! grep -q 'graphical.target' ~/.bash_profile; then
+cat <<'USERBASHPROFILE' >> ~/.bash_profile
+if systemctl -q is-active graphical.target && [[ ! $DISPLAY && $XDG_VTNR -eq 1 ]]; then
+  exec startx
+fi
+USERBASHPROFILE
+fi
+
+# Change to fancy prompt via .bashrc
+# https://unix.stackexchange.com/questions/255789/is-there-a-way-to-prevent-sed-from-interpreting-the-replacement-string
+VAR='PS1="\[\e[0;36m\]┌──\[\e[0m\][ \[\e[0;33m\]\u\[\e[0m\]\[\e[0;32m\]@\[\e[0;36m\]\h\[\e[0m\] ] [ \[\e[0;36m\]\t\[\e[0m\] ]\n\[\e[0;36m\]├── \[\e[0;32m\]\w\[\e[0;36m\]\n\[\e[0;36m\]└>\[\e[0m\]"'
+{ printf '%s\n' "$VAR";cat /etc/bash.bashrc; } | sed '1{h;d;};/PS1=/g' > ~/.bashrc
+
+# Initialise alsa
+# Do after first boot if not installing on same machine as build
+alsactl init
+
+# This is for gtkdialog needs with current Arch64 (wiak remove: may need later change)
+ln -s /usr/lib/libncursesw.so /usr/lib/libtinfo.so.5
+#-----------------------------------------------------------------------
+
+## OPENBOX/TINT2/FILEMANAGER DESKTOP CONFIG
+
+## start OPENBOX STUFF
+# Auto-editing .xinitrc to use openbox instead of twm
+sed -i 's/twm &/exec openbox-session/' ~/.xinitrc
+
+# root user's main openbox configs stored in /root/.config/openbox
+mkdir -p ~/.config/openbox
+cp -a /etc/xdg/openbox/. ~/.config/openbox/  # This resets/overwrites previous run openbox configs
+
+# Modify root's openbox autostart to use tint2+pcmanfm for 
+# bottom-panel+desktop-pinboard_and_wallpaper. 
+# Openbox autostart file has been earlier reset to pacman default if this script has been re-run
+cat <<'AUTOSTART' >> ~/.config/openbox/autostart
+sudo update-menus  # in case of config changes
+exec_lxrandr-autostart
+tint2 &  # start tint2 to auto-create initial ~/.config/tint2/tint2rc from /etc/xdg/tint2/tintrc
+pcmanfm --desktop &  # use pcmanfm for setting wallpapers and to allow desktop icons
+jgmenu_run init  # creates ~/.config/jgmenu/jgmenurc for Start Menu configuration
+sed -i 's/# tint2_look = 0/tint2_look = 1/' ~/.config/jgmenu/jgmenurc  # needed for changed screen resolutions
+# parcellite & # wiak remove: I don't really use or like parcellite so leaving user to install
+# volumeicon &  # pacman -Sy volumeicon and uncomment if you want it but taskbar-provided pavucontrol more reliable and less CPU...
+# NOTE: For volume control currently now using tint2 executor volume script
+# pulseaudio has earlier been started by systemd for non-root logins
+# wiak remove: I'm not sure the following start as 'root' pulseaudio method is optimum
+[ "$USER" == "root" ] && pulseaudio --start  # ignoring Warning
+nm-applet &  # NetworkManager applet
+# xterm -e sudo wiakwifi  # using: 'systemctl enable wiakwifi' instead #wiak remove: using NetworkManager instead now
+if [ ! -L ~/Desktop/wd_save2flash ];then
+  if grep -q "w_changes=RAM2" /proc/cmdline || grep -q "w_changes1=RAM2" /proc/cmdline; then
+    ln -s ~/.local/share/applications/wd_save2flash.desktop ~/Desktop/wd_save2flash
+  else
+    [ -L ~/Desktop/wd_save2flash ] && rm -f ~/Desktop/wd_save2flash 
+  fi
+fi
+AUTOSTART
+
+mkdir -p ~/.config/jgmenu
+cat <<'JGMENU' > ~/.config/jgmenu/append.csv
+^sep()
+#Exit to prompt,openbox --exit,system-log-out
+#Suspend,systemctl -i suspend,system-log-out
+# using icons in /usr/share/icons/Adwaita 22x22 legacy
+userswitch,xterm -geometry 80x7+400+400 -e sh -c "wd_exit userswitch",system-users
+autologin(ON/OFF),xterm -geometry 80x7+400+400 -e sh -c "wd_exit autologin",preferences-other
+RstartX,xterm -geometry 80x7+400+400 -e sh -c "wd_exit restartX",window-close
+Reboot,xterm -geometry 80x7+400+400 -e sh -c "wd_exit reboot",edit-redo
+Poweroff,xterm -geometry 80x7+400+400 -e sh -c "wd_exit poweroff",system-shutdown
+JGMENU
+
+## Fetch distro build components
+# Fetch desktop background image and store in ~/.wallpaper. Needs full wget already installed (since using https)
+# mkdir -p ~/wallpapers  # wiak remove: fix following for FirstRib desktop background
+# wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/optional/graphics/fr_AOT2_desktopbg_default.png -O ~/wallpapers/fr_AOT2_desktopbg_default.png
+
+# Create default openbox keybinding for executing 01open-openbox-menu # wiak remove: need to check/modify this if needed
+# and I preferred here to modify openbox to use 2 rather than 4 alternative desktops
+if ! grep -q 'super-d' ~/.config/openbox/rc.xml; then
+  sed -i '
+/\/keyboard/ i \
+  <keybind key="C-A-space"><action name="ShowMenu"><menu>root-menu</menu></action></keybind> \
+ <!-- Keybindings for tiling --> \
+  <keybind key="W-Left"> \
+    <action name="Unmaximize" /> \
+    <action name="MoveResizeTo"> \
+      <x>0</x> \
+      <y>0</y> \
+      <width>50%</width> \
+      <height>100%</height> \
+    </action> \
+  </keybind> \
+  <keybind key="W-Right"> \
+    <action name="Unmaximize" /> \
+    <action name="MoveResizeTo"> \
+      <x>-0</x> \
+      <y>0</y> \
+      <width>50%</width> \
+      <height>100%</height> \
+    </action> \
+  </keybind> \
+  <keybind key="W-Up"> \
+    <action name="Unmaximize" /> \
+    <action name="MoveResizeTo"> \
+      <x>0</x> \
+      <y>0</y> \
+      <width>100%</width> \
+      <height>50%</height> \
+    </action> \
+  </keybind> \
+  <keybind key="W-Down"> \
+    <action name="Unmaximize" /> \
+    <action name="MoveResizeTo"> \
+      <x>0</x> \
+      <y>-0</y> \
+      <width>100%</width> \
+      <height>50%</height> \
+    </action> \
+  </keybind> \
+    <keybind key="W-Home"> \
+      <action name="Unmaximize"/> \
+      <action name="MoveResizeTo"> \
+        <x>0</x> \
+        <y>0</y> \
+        <width>50%</width> \
+        <height>50%</height> \
+      </action> \
+    </keybind> \
+    <keybind key="W-Prior"> \
+      <action name="Unmaximize"/> \
+      <action name="MoveResizeTo"> \
+        <x>-0</x> \
+        <y>0</y> \
+        <width>50%</width> \
+        <height>50%</height> \
+      </action> \
+    </keybind> \
+    <keybind key="W-Next"> \
+      <action name="Unmaximize"/> \
+      <action name="MoveResizeTo"> \
+        <x>0</x> \
+        <y>-0</y> \
+        <width>50%</width> \
+        <height>50%</height> \
+      </action> \
+    </keybind> \
+    <keybind key="W-End"> \
+      <action name="Unmaximize"/> \
+      <action name="MoveResizeTo"> \
+        <x>-0</x> \
+        <y>-0</y> \
+        <width>50%</width> \
+        <height>50%</height> \
+      </action> \
+    </keybind> \
+    <keybind key="W-M"> \
+      <action name="ToggleMaximize"/> \
+    </keybind> \
+    <keybind key="W-I"> \
+      <action name="Iconify"/> \
+    </keybind>
+s/number>4/number>2/  # change number of openbox desktops from 4 to 2
+s/keybind key="W-d"/keybind key="super-d"/  # use WindowsKey-d to toggle desktop
+/<font place="MenuItem">/,/font size in points/s/size>.*<\/size>/size>12<\/size>/
+' ~/.config/openbox/rc.xml
+fi
+
+# Overwrite root's copy of original openbox menu.xml to use simple openbox pipe menu (per Arch wiki)
+# Not a pretty menu, so planning to mainly use jgmenu (Python) instead, 
+# but right-click tint2 panel will still use this openbox root menu
+cat <<'OPENBOXMENU' > ~/.config/openbox/menu.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+<menu id="root-menu" label="Openbox 3">
+  <item label="Lxterminal">
+    <action name="Execute"><execute>lxterminal</execute></action>
+  </item>
+  <item label="Screenshot gui">
+    <action name="Execute"><execute>gnome-screenshot --interactive</execute></action>
+  </item>
+  <item label="Screenshot now">
+    <action name="Execute"><execute>gnome-screenshot</execute></action>
+  </item>
+  <item label="Mtpaint">
+    <action name="Execute"><execute>mtpaint</execute></action>
+  </item>
+  <item label="Calculator">
+    <action name="Execute"><execute>speedcrunch</execute></action>
+  </item>
+  <item label="Filemanager">
+    <action name="Execute"><execute>pcmanfm</execute></action>
+  </item>
+  <item label="Leafpad">
+    <action name="Execute"><execute>leafpad</execute></action>
+  </item>
+  <item label="Geany">
+    <action name="Execute"><execute>geany</execute></action>
+  </item>
+  <item label="WebBrowser">
+    <action name="Execute"><execute>chromium-spot</execute></action>
+  </item>
+  <separator />
+  <menu id="applications" label="Applications" execute="xdg_menu --format openbox3-pipe --root-menu /etc/xdg/menus/arch-applications.menu" />
+  <separator />
+  <item label="userswitch">
+    <action name="Execute"><execute>xterm -geometry 80x7+400+400 -e sh -c "wd_exit userswitch"</execute></action>
+  </item>
+  <item label="autologin(ON/OFF)">
+    <action name="Execute"><execute>xterm -geometry 80x7+400+400 -e sh -c "wd_exit autologin"</execute></action>
+  </item>
+  <item label="RestartX">
+    <action name="Execute"><execute>xterm -geometry 80x7+400+400 -e sh -c "wd_exit restartX"</execute></action>
+  </item>
+  <item label="Reboot">
+    <action name="Execute"><execute>xterm -geometry 80x7+400+400 -e sh -c "wd_exit reboot"</execute></action>
+  </item>
+  <item label="Shutdown">
+    <action name="Execute"><execute>xterm -geometry 80x7+400+400 -e sh -c "wd_exit poweroff"</execute></action>
+  </item>
+</menu>
+</openbox_menu>
+OPENBOXMENU
+
+# Insert new Settings category into Openbox Pipe Menu
+if ! grep -q 'Arch-Settings' /etc/xdg/menus/arch-applications.menu; then
+  # change menu order, since alphabetical and Audio comes before Sound...
+  sed -i 's/Sound \& Video/Audio \& Video/g' /usr/share/desktop-directories/Arch-Multimedia.directory
+  sed -i '$i \
+  <Menu> \
+    <Name>Settings</Name> \
+    <Directory>Arch-Settings.directory</Directory> \
+    <Include> \
+      <And> \
+        <Category>Settings</Category> \
+        <Not><Category>System</Category></Not> \
+      </And> \
+    </Include> \
+  </Menu> \
+' /etc/xdg/menus/arch-applications.menu
+fi
+
+# The following .desktop files are for openbox startmenu and toggle-show-desktop
+cat <<'MENUBUTTON' > /usr/share/applications/01open-openbox-menu.desktop
+[Desktop Entry]
+Name=OPEN OPENBOX MENU
+Icon=start-here.png
+Exec=xdotool key ctrl+alt+space
+Terminal=false
+Type=Application
+MENUBUTTON
+
+# super+d is Msoft windows key + letter d
+cat <<'TOGGLEDESKTOP' > /usr/share/applications/50toggle-show-desktop.desktop
+[Desktop Entry]
+Name=TOGGLE SHOW DESKTOP
+Icon=user-desktop.png
+Exec=xdotool key super+d
+Terminal=false
+Type=Application
+TOGGLEDESKTOP
+
+cat <<'SEARCH' > /usr/share/applications/pcmanfm-search.desktop
+[Desktop Entry]
+Name=Pcmanfm File Search
+Icon=system-search.png
+Exec=pcmanfm -f
+Terminal=false
+Type=Application
+Categories=Utility
+SEARCH
+## cat <<'TIMEZN' > /usr/share/applications/timezn.desktop
+## [Desktop Entry]
+## Name=Timezone set up
+## Icon=timezone-icon.svg
+## Exec=tzselect
+## Terminal=true
+## Type=Application
+## Categories=Utility;System;Modules;
+## TIMEZN
+## end OPENBOX STUFF
+#-----------------------------------------------------------------------
+
+## start TINT2 STUFF
+# POPULATE tint2 launcher panel apps2launch folder
+mkdir -p ~/.config/tint2/apps2launch
+# Leaving empty - users can populate their own ~/.config/tint2/apps2launch
+# But recommended to use Tint2 Settings (tint2conf.desktop) instead to
+# add to or remove from what the following taskbar launcher provides:
+if [ ! -e /etc/xdg/tint2/tint2rcFIRSTRIB ]; then
+
+  # Make XXX default app for image types
+  xdg-mime default geeqie.desktop `grep 'MimeType=' /usr/share/applications/geeqie.desktop | sed -e 's/.*=//' -e 's/;/ /g'`
+
+  # Configure tint2rc to use apps2launch contents in launcher
+  ## Comment IN or Comment OUT the ones you want to appear on tint2 launcher panel
+cat <<'TINT2RC' > /etc/xdg/tint2/tint2rc
+#---- Generated by tint2conf e978 ----
+# See https://gitlab.com/o9000/tint2/wikis/Configure for 
+# full documentation of the configuration options.
+#-------------------------------------
+# Gradients
+#-------------------------------------
+# Backgrounds
+# Background 1: Panel
+rounded = 0
+border_width = 0
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #1a5fb4 100
+border_color = #000000 30
+background_color_hover = #000000 60
+border_color_hover = #000000 30
+background_color_pressed = #000000 60
+border_color_pressed = #000000 30
+
+# Background 2: Default task, Iconified task
+rounded = 4
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #777777 20
+border_color = #777777 30
+background_color_hover = #aaaaaa 22
+border_color_hover = #eaeaea 44
+background_color_pressed = #555555 4
+border_color_pressed = #eaeaea 44
+
+# Background 3: Active task
+rounded = 4
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #777777 20
+border_color = #ffffff 40
+background_color_hover = #aaaaaa 22
+border_color_hover = #eaeaea 44
+background_color_pressed = #555555 4
+border_color_pressed = #eaeaea 44
+
+# Background 4: Battery, Button, Executor, Urgent task
+rounded = 4
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #9141ac 100
+border_color = #aa7733 100
+background_color_hover = #cc7700 100
+border_color_hover = #aa7733 100
+background_color_pressed = #555555 4
+border_color_pressed = #aa7733 100
+
+# Background 5: Clock, Tooltip
+rounded = 1
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #a51d2d 100
+border_color = #333333 100
+background_color_hover = #cc7700 100
+border_color_hover = #000000 100
+background_color_pressed = #ffffaa 100
+border_color_pressed = #000000 100
+
+#-------------------------------------
+# Panel
+panel_items = LTSEPBC
+panel_size = 100% 30
+panel_margin = 0 0
+panel_padding = 2 0 2
+panel_background_id = 1
+wm_menu = 1
+panel_dock = 0
+panel_pivot_struts = 0
+panel_position = bottom center horizontal
+panel_layer = top
+panel_monitor = all
+panel_shrink = 0
+autohide = 0
+autohide_show_timeout = 0
+autohide_hide_timeout = 0.5
+autohide_height = 2
+strut_policy = follow_size
+panel_window_name = tint2
+disable_transparency = 1
+mouse_effects = 1
+font_shadow = 0
+mouse_hover_icon_asb = 100 0 10
+mouse_pressed_icon_asb = 100 0 0
+scale_relative_to_dpi = 0
+scale_relative_to_screen_height = 0
+
+#-------------------------------------
+# Taskbar
+taskbar_mode = multi_desktop
+taskbar_hide_if_empty = 0
+taskbar_padding = 0 0 2
+taskbar_background_id = 0
+taskbar_active_background_id = 0
+taskbar_name = 1
+taskbar_hide_inactive_tasks = 0
+taskbar_hide_different_monitor = 0
+taskbar_hide_different_desktop = 0
+taskbar_always_show_all_desktop_tasks = 0
+taskbar_name_padding = 4 2
+taskbar_name_background_id = 0
+taskbar_name_active_background_id = 0
+taskbar_name_font_color = #e3e3e3 100
+taskbar_name_active_font_color = #ffffff 100
+taskbar_distribute_size = 0
+taskbar_sort_order = none
+task_align = left
+
+#-------------------------------------
+# Task
+task_text = 1
+task_icon = 1
+task_centered = 1
+urgent_nb_of_blink = 100000
+task_maximum_size = 150 35
+task_padding = 2 2 4
+task_tooltip = 1
+task_thumbnail = 0
+task_thumbnail_size = 210
+task_font_color = #ffffff 100
+task_background_id = 2
+task_active_background_id = 3
+task_urgent_background_id = 4
+task_iconified_background_id = 2
+mouse_left = toggle_iconify
+mouse_middle = none
+mouse_right = close
+mouse_scroll_up = toggle
+mouse_scroll_down = iconify
+
+#-------------------------------------
+# System tray (notification area)
+systray_padding = 0 4 2
+systray_background_id = 0
+systray_sort = ascending
+systray_icon_size = 19
+systray_icon_asb = 100 0 0
+systray_monitor = 1
+systray_name_filter = 
+
+#-------------------------------------
+# Launcher
+# Uncomment those you want on tint2 launchbar
+launcher_padding = 2 4 2
+launcher_background_id = 0
+launcher_icon_background_id = 0
+launcher_icon_size = 24
+launcher_icon_asb = 100 0 0
+launcher_icon_theme_override = 0
+startup_notifications = 1
+launcher_tooltip = 1
+launcher_item_app = /usr/share/applications/jgmenu.desktop
+#launcher_item_app = /usr/share/applications/01open-openbox-menu.desktop
+launcher_item_app = /usr/share/applications/50toggle-show-desktop.desktop
+launcher_item_app = /usr/share/applications/pcmanfm-search.desktop
+#launcher_item_app = /usr/share/applications/speedcrunch.desktop
+launcher_item_app = /usr/share/applications/pcmanfm.desktop
+#launcher_item_app = /usr/share/applications/chromium-spot.desktop
+launcher_item_app = /usr/share/applications/lxterminal.desktop
+launcher_item_app = /usr/share/applications/org.gnome.Screenshot.desktop
+launcher_item_app = /usr/share/applications/cherrytree.desktop
+launcher_item_app = /usr/share/applications/leafpad.desktop
+launcher_item_app = /usr/share/applications/geany.desktop
+launcher_item_app = /usr/share/applications/tint2conf.desktop
+launcher_item_app = ~/.local/share/applications/wd_save2flash.desktop
+#launcher_item_app = /usr/share/applications/01open-openbox-menu.desktop \
+#launcher_item_app = /usr/share/applications/galculator.desktop \
+#launcher_item_app = /usr/share/applications/osmo.desktop \
+#launcher_item_app = /usr/share/applications/gftp.desktop \
+#launcher_item_app = /usr/share/applications/gpicview.desktop \
+#launcher_item_app = /usr/share/applications/nomacs.desktop \
+#launcher_item_app = /usr/share/applications/mtpaint.desktop \
+#launcher_item_app = /usr/share/applications/gimp.desktop \
+#launcher_item_app = /usr/share/applications/org.inkscape.Inkscape.desktop \
+#launcher_item_app = /usr/share/applications/libreoffice-startcenter.desktop \
+#launcher_item_app = /usr/share/applications/org.gnome.Packages.desktop \
+#launcher_item_app = /usr/share/applications/pavucontrol.desktop \
+#launcher_item_app = /usr/share/applications/pcmanfm-desktop-pref.desktop \
+#launcher_apps_dir = .config/tint2/apps2launch
+
+#-------------------------------------
+# Clock
+time1_format = %H:%M
+time2_format = %A %d %B
+time1_timezone = 
+time2_timezone = 
+clock_font_color = #ffffff 100
+clock_padding = 2 0
+clock_background_id = 5
+clock_tooltip = 
+clock_tooltip_timezone = 
+clock_lclick_command = osmo
+clock_rclick_command = leafpad /usr/local/etc/settime.txt
+clock_mclick_command = 
+clock_uwheel_command = 
+clock_dwheel_command = 
+
+#-------------------------------------
+# Battery
+battery_tooltip = 1
+battery_low_status = 35
+battery_low_cmd = gxmessage 'tint2: Battery low!'
+battery_full_cmd = gxmessage 'tint2: Battery charged'
+battery_font_color = #ffffff 100
+bat1_format = %s
+bat2_format = %p %t
+battery_padding = 0 0
+battery_background_id = 4
+battery_hide = 101
+battery_lclick_command = 
+battery_rclick_command = 
+battery_mclick_command = 
+battery_uwheel_command = 
+battery_dwheel_command = 
+ac_connected_cmd =  gxmessage 'tint2: power on'
+ac_disconnected_cmd =  gxmessage 'tint2: power off'
+
+#-------------------------------------
+# Executor 1
+execp = new
+execp_command = ~/.config/tint2/executors/volume 120
+execp_interval = 0
+execp_has_icon = 1
+execp_cache_icon = 1
+execp_continuous = 0
+execp_markup = 0
+execp_monitor = all
+execp_tooltip = L:mute, M:precord, R:pavucontrol, Wheel:Up/Down
+execp_lclick_command = wd_pactl mutetoggle
+execp_rclick_command = pavucontrol
+execp_mclick_command = precord
+execp_uwheel_command = wd_pactl up
+execp_dwheel_command = wd_pactl down
+execp_font = Sans 10
+execp_font_color = #ffffff 100
+execp_padding = 16 0
+execp_background_id = 4
+execp_centered = 0
+execp_icon_w = 24
+execp_icon_h = 24
+
+#-------------------------------------
+# Button 1
+button = new
+button_icon = /usr/share/icons/Adwaita/scalable/status/battery-level-100-symbolic.svg
+button_text = 
+button_tooltip = Brightness - L:night_full, M:low, R:mid, W:Up/Down
+button_lclick_command = wd_tog_xandr full
+button_rclick_command = wd_tog_xandr mid
+button_mclick_command = wd_tog_xandr low
+button_uwheel_command = sudo light -A 5
+button_dwheel_command = sudo wd_light -U 5
+button_font_color = #000000 100
+button_padding = 0 0
+button_background_id = 4
+button_centered = 0
+button_max_icon_size = 0
+
+#-------------------------------------
+# Tooltip
+tooltip_show_timeout = 0.5
+tooltip_hide_timeout = 0.1
+tooltip_padding = 4 4
+tooltip_background_id = 5
+tooltip_font_color = #dddddd 100
+TINT2RC
+  cp -a /etc/xdg/tint2/tint2rc /etc/xdg/tint2/tint2rcFIRSTRIB  # backup
+fi
+# Note that ~/.config/tint2/tint2rc gets auto-copied from /etc/xdg/tint2/tint2rc first time tint2 is started
+
+# NOTE RE ADDING BUTTIONS TO TINT2 PANEL:
+# Optionally could use tint2conf (tint2 panel manager) to add Panel Items Buttons for w_save
+# For example: Text wd_s; Left click command wd_saveRAM1 or similar 
+# and Toggle Display resolution (Text T_D; Left click command wd_Tdsply) to tint2 panel
+
+# start tint2 executors scripts
+mkdir -p ~/.config/tint2/executors
+
+# volume tint2 control via tint2rc executor
+cat <<'TINT2VOLUME' > ~/.config/tint2/executors/volume
+#!/bin/bash
+# wiak mod of:
+# https://github.com/I-LeCorbeau/tint2-executors/blob/master/volume
+maxvol=$1
+psink=`pacmd list-sinks | awk '/ * index: / {printf "%s", $3}'`
+fix=`pacmd list-sinks | grep -m 1 "index" | awk '{print $NF}'` #wiak
+psink=$((psink-$fix))
+strm=$((psink+psink+1))
+muted=($(pacmd list-sinks | awk '/muted/ { print $2 }'))
+vol=$(pactl list sinks | awk '/Volume:/ {printf "%s ",$5}' | cut -f${strm} -d ' ' | cut -f1 -d '%')
+if [ $vol -gt $maxvol ];then
+ pactl set-sink-volume $psink ${maxvol}%
+ vol=$(pactl list sinks | awk '/Volume:/ {printf "%s ",$5}' | cut -f${strm} -d ' ' | cut -f1 -d '%')
+fi
+if [[ ${muted[$psink]} = "no" ]]; then
+	if [[ $vol -ge 65 ]]; then
+		echo /usr/share/icons/Adwaita/scalable/status/audio-volume-high-symbolic.svg
+		echo "$vol%"
+	elif [[ $vol -ge 40 ]]; then
+			echo /usr/share/icons/Adwaita/scalable/status/audio-volume-medium-symbolic.svg
+			echo "$vol%"
+	elif
+	       [[ $vol -ge 0 ]]; then
+       			echo /usr/share/icons/Adwaita/scalable/status/audio-volume-low-symbolic.svg
+	 		echo "$vol%"		
+	fi
+else
+	echo /usr/share/icons/Adwaita/scalable/status/audio-volume-muted-symbolic.svg
+	echo "muted"
+fi
+exit 0
+TINT2VOLUME
+chmod +x ~/.config/tint2/executors/volume
+#-----------------------------------------------------------------------
+
+## end TINT2 STUFF
+#-----------------------------------------------------------------------
+
+## start FILEMANAGER STUFF (here pcmanfm)
+# Configure default (/etc/xdg/pcmanfm) pcmanfm.conf
+sed -i '
+s/show_hidden=0/show_hidden=1/ # show hidden files (hey this is firstrib!)
+' /etc/xdg/pcmanfm/default/pcmanfm.conf
+
+# CONFIGURE pcmanfm desktop "pinboard"
+# Below hacks default pcmanfm desktop/pinboard ~/.config/pcmanfm/default/desktop-items-0.conf file
+# NOTE WELL: Can also/alternatively change desktop background image from commandline when pcmanfm is
+# in desktop mode with, for example: pcmanfm --wallpaper-mode center -w /usr/share/pixmaps/archlinux.svg
+mkdir -p ~/.config/pcmanfm/default/
+cat <<'DESKTOPPREF' > ~/.config/pcmanfm/default/desktop-items-0.conf
+[*]
+wallpaper_mode=stretch
+wallpaper_common=1
+wallpaper=/root/wallpapers/fr_AOT2_desktopbg_default.png
+desktop_bg=#2797a7
+desktop_fg=#ffffff
+desktop_shadow=#000000
+desktop_font=Sans 12
+show_wm_menu=0
+sort=mtime;ascending;
+show_documents=0
+show_trash=1
+show_mounts=1
+DESKTOPPREF
+
+# PUT OPTIONAL ICONS ON DESKTOP PINBOARD (this large code chunk can be removed since can easily be done manually by user as described below). Also, if you use catfish search, remove these since catfish conflicts with them.
+# User can right click icon to remove (only symlinks) and/or 
+# create the same manually by opening pcmanfm at Places: Applications and
+# linking chosen icons there to Desktop (or Places: Desktop folder)
+# Users can also drag and drop from pcmanfm filemanager to Desktop to create symlinks to any other stored file
+#mkdir -p ~/Desktop
+#cat <<'ACCESSORIES' > ~/Desktop/Accessories
+#[Desktop Entry]
+#Type=Link
+#Name=Accessories
+#Icon=applications-accessories
+#URL=menu://applications/Accessories
+#ACCESSORIES
+
+# Change default libfm.conf configuration to
+# use single click mode
+# don't ask options on launch executable files
+# ask for drag and drop option to use (makes symlinking easy in pcmanfm)
+mv /etc/xdg/libfm/libfm.conf /etc/xdg/libfm/libfm.confORIGINAL  # backup
+cat <<'LIBFMCONF' > /etc/xdg/libfm/libfm.conf
+[config]
+single_click=1
+use_trash=1
+confirm_del=1
+thumbnail_local=1
+thumbnail_max=2048
+drop_default_action=ask
+quick_exec=1
+terminal=lxterminal
+archiver=xarchiv
+
+[ui]
+big_icon_size=48
+small_icon_size=24
+thumbnail_size=128
+pane_icon_size=24
+show_thumbnail=1
+
+[places]
+places_root=1
+LIBFMCONF
+cp -a /etc/xdg/libfm/libfm.conf /etc/xdg/libfm/libfm.confFIRSTRIB  # make backup in case overwritten
+
+## Add some extra pcmanfm actions
+#  Refer e.g. to: http://www.lxlinux.com/index.html and https://madebits.github.io/#r/linux-pcmanfm-actions.md
+mkdir -p ~/.local/share/file-manager/actions ~/.local/share/applications
+#cat <<'BUILDDEB' > ~/.local/share/file-manager/actions/build-deb.desktop
+#[Desktop Entry]
+#Type=Action
+#Tooltip=Build .deb
+#Name=Build .deb
+#Profiles=profile-zero;
+#Icon=debian-logo
+#[X-Action-Profile profile-zero]
+#MimeTypes=inode/directory
+#Exec=sudo make-deb-package %f
+#Name=Default profile
+#BUILDDEB
+cat <<'RCLICK4TERMINAL' > ~/.local/share/file-manager/actions/openlxterminal.desktop
+[Desktop Entry]
+Type=Action
+Tooltip=Terminal Here
+Name=Terminal Here
+Profiles=profile-zero;
+Icon=lxterminal
+[X-Action-Profile profile-zero]
+MimeTypes=inode/directory
+Exec=lxterminal --working-directory=%f
+Name=Default profile
+RCLICK4TERMINAL
+cat <<'RCLICK4GDMAP' > ~/.local/share/file-manager/actions/gdmap.desktop
+[Desktop Entry]
+Type=Action
+Tooltip=Graphical Disk Map
+Name=Graphical Disk Map
+Profiles=profile-zero;
+Icon=gdmap_icon
+[X-Action-Profile profile-zero]
+MimeTypes=inode/directory
+Exec=gdmap -f %f
+Name=Default profile
+RCLICK4GDMAP
+cat <<'RCLICK4FMSEARCH' > ~/.local/share/file-manager/actions/pcmanfmsearch.desktop
+[Desktop Entry]
+Type=Action
+Tooltip=PCMANFM Search
+Name=PCMANFM Search
+Profiles=profile-zero;
+Icon=system-search.png
+[X-Action-Profile profile-zero]
+MimeTypes=inode/directory
+Exec=pcmanfm -f
+Name=Default profile
+RCLICK4FMSEARCH
+cat <<'SXIVPLAYGIF' > ~/.local/share/file-manager/actions/sxivplaygif.desktop
+[Desktop Entry]
+Type=Action
+Tooltip=sxiv Play GIF
+Name=sxivPlayGIF
+Profiles=profile-zero;
+Icon=media-playback-start.png
+[X-Action-Profile profile-zero]
+MimeTypes=image/gif
+Exec=sxiv -a %f
+Name=Default profile
+SXIVPLAYGIF
+cat <<'WALLPAPER' > ~/.local/share/file-manager/actions/wallpaper.desktop
+[Desktop Entry]
+Type=Action
+Tooltip=Set As Wallpaper
+Name=Set As Wallpaper
+Icon=user-desktop
+Profiles=profile-zero;
+[X-Action-Profile profile-zero]
+MimeTypes=image/*;
+Exec=pcmanfm -w %f
+Name[en]=Default profile
+SelectionCount=1
+WALLPAPER
+
+## end FILEMANAGER STUFF
+#-----------------------------------------------------------------------
+## END config systemd, basic wifi, X, Desktop, and sound----------------
+
+## start MIME TYPE MANIPULATIONS
+# Add new mimetypes for sfs and squashfs files
+mkdir -p ~/.local/share/mime/packages
+cat <<'MIMESQUASHFS' > ~/.local/share/mime/packages/squashfs.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+    <mime-type type="application/x-squashfs">
+        <comment>squashfs file</comment>
+        <icon name="application-x-squashfs"/>
+        <glob-deleteall/>
+        <glob pattern="*.squashfs"/>
+        <sub-class-of type="application/octet-stream"/>
+    </mime-type>
+</mime-info>
+MIMESQUASHFS
+cat <<'MIMESFS' > ~/.local/share/mime/packages/sfs.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+    <mime-type type="application/x-squashfs">
+        <comment>sfs file</comment>
+        <icon name="application-x-squashfs"/>
+        <glob-deleteall/>
+        <glob pattern="*.sfs"/>
+        <sub-class-of type="application/octet-stream"/>
+    </mime-type>
+</mime-info>
+MIMESFS
+cat <<'EXT4DAT' > ~/.local/share/mime/packages/dat.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-dat">
+         <comment>ext4 save file</comment>
+         <glob pattern="*.dat"/>
+         <sub-class-of type="application/octet-stream"/>
+  </mime-type>
+</mime-info>
+EXT4DAT
+#cat <<'MIMEDEB' > ~/.local/share/mime/packages/deb.xml
+#<?xml version="1.0" encoding="UTF-8"?>
+#<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+#    <mime-type type="application/x-deb">
+#        <comment>deb file</comment>
+#        <icon name="application-x-deb"/>
+#        <glob-deleteall/>
+#        <glob pattern="*.deb"/>
+#        <sub-class-of type="application/octet-stream"/>
+#    </mime-type>
+#</mime-info>
+#MIMEDEB
+# make mpv default app for mp4 videos (rather than mplayer)
+if [ "`tail -1 ~/.config/mimeapps.list`" != "video/mp4=mpv.desktop" ]; then
+  cat <<'MPVDEFAULT' >> ~/.config/mimeapps.list
+video/mp4=mpv.desktop
+MPVDEFAULT
+fi
+update-mime-database ~/.local/share/mime
+
+# Will use new 10gtkdialogGTK3_filemnt64.sfs or extracted pieces from that put into /usr/local hierarchy
+# including Terry Becker (SunBurnt) excellent filemnt pup utility
+cat <<'XSQUASHFS' > ~/.local/share/applications/filemnt_beckerSFS.desktop
+[Desktop Entry]
+Type=Application
+Name=filemnt SFS
+Exec=sudo filemnt %f
+Categories=Utility;
+NoDisplay=true
+MimeType=application/x-squashfs
+Terminal=false
+XSQUASHFS
+cat <<'XCDIMAGE' > ~/.local/share/applications/filemnt_beckerCD.desktop
+[Desktop Entry]
+Type=Application
+Name=filemnt CD
+Exec=sudo filemnt %f
+Categories=Utility;
+NoDisplay=true
+MimeType=application/x-cd-image
+Terminal=false
+XCDIMAGE
+cat <<'XDAT' > ~/.local/share/applications/filemnt_beckerDAT.desktop
+[Desktop Entry]
+Type=Application
+Name=filemnt DATA
+Exec=sudo filemnt %f
+Categories=Utility;
+NoDisplay=true
+MimeType=application/x-dat
+Terminal=false
+XDAT
+cat <<'WDEXTRACT' > ~/.local/share/applications/wd_extract.desktop
+[Desktop Entry]
+Type=Application
+Name=WD Extract
+Exec=wd_extract %f
+Categories=Utility;
+NoDisplay=true
+MimeType=application/x-deb;application/x-xz;application/gzip;application/x-bzip2;application/x-tar;application/zstd;application/x-squashfs;
+Terminal=false
+Icon=package-x-generic.png
+WDEXTRACT
+cat <<'UEXTRACT' > ~/.local/share/applications/UExtract.desktop
+[Desktop Entry]
+Encoding=UTF-8
+Name=UExtract
+Comment=Ultimate Extractor
+Comment[pl]=Uniwersalny Rozpakowywacz
+Comment[es]=Extractor de última generación
+GenericName=Extractor
+Exec=/usr/local/apps/UExtract/AppRun %F
+Terminal=false
+Type=Application
+Icon=/usr/local/apps/UExtract/UExtract.svg
+Categories=Utility;
+MimeType=application/dicom;application/epub+zip;application/gzip;application/img;application/initramfs-gz;application/mbox;application/ms-tnef;application/pdf;application/pet;application/pup;application/vnd.adobe.flash.movie;application/vnd.android.package-archive;application/vnd.appimage;application/vnd.chess-pgn;application/vnd.comicbook-rar;application/vnd.comicbook+zip;application/vnd.debian.binary-package;application/vnd.etsi.asic-e+zip;application/vnd.flatpak;application/vnd.ms-cab-compressed;application/vnd.ms-excel.sheet.macroEnabled.12;application/vnd.ms-powerpoint;application/vnd.ms-tnef;application/vnd.oasis.opendocument.chart;application/vnd.oasis.opendocument.database;application/vnd.oasis.opendocument.graphics;application/vnd.oasis.opendocument.graphics-template;application/vnd.oasis.opendocument.image;application/vnd.oasis.opendocument.presentation;application/vnd.oasis.opendocument.presentation-template;application/vnd.oasis.opendocument.spreadsheet;application/vnd.oasis.opendocument.spreadsheet-template;application/vnd.oasis.opendocument.text;application/vnd.oasis.opendocument.text-master;application/vnd.oasis.opendocument.text-template;application/vnd.oasis.opendocument.text-web;application/vnd.openofficeorg.extension;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.rar;application/vnd.sqlite3;application/vnd.squashfs;application/vnd.sun.xml.calc;application/vnd.sun.xml.calc.template;application/vnd.sun.xml.draw;application/vnd.sun.xml.draw.template;application/vnd.sun.xml.impress;application/vnd.sun.xml.impress.template;application/vnd.sun.xml.math;application/vnd.sun.xml.writer;application/vnd.sun.xml.writer.global;application/vnd.sun.xml.writer.template;application/x-7z-compressed;application/x-abiword;application/x-ace;application/x-aes;application/x-alz;application/x-amiga-disk-format;application/x-amipro;application/x-apple-diskimage;application/x-arc;application/x-archive;application/x-arj;application/x-bfe;application/x-blender;application/x-btrfs-image;application/x-bzip;application/x-bzip-compressed-tar;application/x-cb7;application/x-cbr;application/x-cbt;application/x-cbz;application/x-ccrypt;application/x-cd-image;application/x-chm;application/x-compress;application/x-compressed-tar;application/x-cpio;application/x-cpio-compressed;application/x-dar;application/x-deb;application/x-debian-package;application/x-emerald-theme;application/x-ext2-image;application/x-ext3-image;application/x-ext4-image;application/x-font-pcf;application/x-gamegear-rom;application/x-gettext-translation;application/x-gnumeric;application/x-gz-font-linux-psf;application/x-gzip;application/x-gzpdf;application/x-gzpostscript;application/x-hwp;application/x-initrd;application/x-initrd-compressed;application/x-iso9660-appimage;application/x-java-archive;application/x-java-pack200;application/x-lha;application/x-linux-kernel;application/x-lz4;application/x-lz4-compressed-tar;application/x-lrzip-compressed-tar;application/x-lzip;application/x-lzip-compressed-tar;application/x-lzma;application/x-lzma-compressed-tar;application/x-lzop;application/x-matroska;application/x-mimearchive;application/x-ms-dos-executable;application/x-ms-wim;application/x-navi-animation;application/x-nsv;application/x-ole-storage;application/x-pak;application/x-php;application/x-rar;application/x-raw-disk-image;application/x-raw-disk-image-xz-compressed;application/x-rpm;application/x-shar;application/x-sharedlib;application/x-shockwave-flash;application/x-sms-rom;application/x-source-rpm;application/x-sqlite3;application/x-squashfs-image;application/x-tar;application/x-tarz;application/x-truecrypt;application/x-tzo;application/x-veracrypt;application/x-virtualbox-ova;application/x-virtualbox-vbox-extpack;application/x-virtualbox-vdi;application/x-virtualbox-vmdk;application/x-windows-themepack;application/x-xar;application/x-xpinstall;application/x-xz;application/x-xz-compressed-tar;application/x-zstd-compressed-tar;application/x-zoo;application/zip;application/zstd;audio/basic;audio/mpeg;audio/x-flac;audio/x-m4b;audio/x-mo3;audio/x-ms-wma;audio/x-wav;audio/x-wavpack;font/collection;image/bmp;image/gif;image/jpeg;image/png;image/vnd.djvu;image/vnd.djvu+multipage;image/vnd.microsoft.icon;image/webp;image/x-icns;image/x-win-bitmap;image/x-xcursor;message/rfc822;text/x-vhdl;video/3gpp;video/mp2t;video/mp4;video/mpeg;video/ogg;video/quicktime;video/webm;video/x-flv;video/x-matroska;video/x-matroska-3d;video/x-msvideo;video/x-ms-wmv;application/x-squashfs;
+UEXTRACT
+cat <<'SAVE2FL' > ~/.local/share/applications/wd_save2flash.desktop
+[Desktop Entry]
+Name=save2flash
+GenericName=wd_save2flash
+Comment=save RAM2 to media
+Exec=/usr/local/bin/wd_save2flash
+Terminal=true
+Icon=system-save-session
+Type=Application
+Categories=Utility;System;Modules;
+SAVE2FL
+update-desktop-database ~/.local/share/applications
+
+## end MIME TYPE MANIPULATIONS
+#-----------------------------------------------------------------------
+
+## start ICON HACKS - currently simply copying icons into /usr/share/pixmaps instead of the following
+# Horrible but simple hacks to help apps/menus find icons # wiak remove: really horrible, probably better ways...
+# Link from /usr/share/pixmaps since always found there
+#ln -s /usr/share/icons/hicolor/scalable/apps/org.gnome.Screenshot.svg /usr/share/pixmaps/org.gnome.Screenshot.svg 2>/dev/null
+#ln -s /usr/share/icons/hicolor/scalable/apps/tint2.svg /usr/share/pixmaps/tint2.svg 2>/dev/null
+#ln -s /usr/share/icons/hicolor/scalable/apps/tint2conf.svg /usr/share/pixmaps/tint2conf.svg 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/network-wired.png /usr/share/pixmaps/network-wired.png 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/network-wireless.png /usr/share/pixmaps/network-wireless.png 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/multimedia-volume-control-symbolic.symbolic.png /usr/share/pixmaps/multimedia-volume-control.png 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/system-file-manager.png /usr/share/pixmaps/system-file-manager.png 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/applications-system.png /usr/share/pixmaps/utilities-system-monitor.png 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/system-software-update.png /usr/share/pixmaps/system-software-update.png 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/system-software-install.png /usr/share/pixmaps/system-software-install.png 2>/dev/null
+#ln -s /usr/share/icons/hicolor/scalable/stock/media/stock_xfburn.svg /usr/share/pixmaps/stock_xfburn.svg 2>/dev/null
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/preferences-desktop-theme.png /usr/share/pixmaps/preferences-desktop-theme.png
+#ln -s /usr/share/icons/Adwaita/48x48/places/user-desktop.png /usr/share/pixmaps/user-desktop.png
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/video-display.png /usr/share/pixmaps/video-display.png
+#ln -s /usr/share/icons/Adwaita/48x48/legacy/system-search.png /usr/share/pixmaps/system-search.png
+
+# Make the following Show and provide missing desktop Icon where necessary
+# Updates may well break this - will have to check later, wiak
+printf "Icon=utilities-system-monitor\n" >> /usr/share/applications/lstopo.desktop
+sed -i '/NotShowIn/d' /usr/share/applications/lxappearance.desktop
+sed -i '/NotShowIn/d' /usr/share/applications/pcmanfm-desktop-pref.desktop
+sed -i '/NotShowIn/d' /usr/share/applications/lxrandr.desktop
+## end ICON HACKS
+#-----------------------------------------------------------------------
+
+# configure geany and jgmenu
+geany 2>/dev/null
+sed -i 's/line_wrapping=false/line_wrapping=true/' ~/.config/geany/geany.conf
+sed -i 's/sidebar_visible=true/sidebar_visible=false/' ~/.config/geany/geany.conf
+sed -i 's/msgwindow_visible=true/msgwindow_visible=false/' ~/.config/geany/geany.conf
+jgmenu_run init  # creates ~/.config/jgmenu/jgmenurc for Start Menu configuration
+sed -i 's/# tint2_look = 0/tint2_look = 1/' ~/.config/jgmenu/jgmenurc  # needed for changed screen resolutions
+cat ~/.config/geany/geany.conf
+cat ~/.config/jgmenu/jgmenurc
+
+### START usrlocalbin scripts; others may be added via tar.XX-----------
+# Merge/build-in last Arch64 fixes content
+cat <<'EXECDESK' > /usr/local/bin/exec_desktopfile.awk
+#!/bin/awk -f
+
+BEGIN    {
+FS="=";
+}
+/Exec=/{
+system($2);
+}
+EXECDESK
+chmod +x /usr/local/bin/exec_desktopfile.awk
+
+cat <<'EXECLXRANDR' > /usr/local/bin/exec_lxrandr-autostart
+#!/bin/sh
+exec exec_desktopfile.awk ~/.config/autostart/lxrandr-autostart.desktop
+EXECLXRANDR
+chmod +x /usr/local/bin/exec_lxrandr-autostart
+#-----------------------------------------------------------------------
+
+## start CHROMIUM BROWSER SETUP
+# Remove all of following CHROMIUMXX code section if not using chromium:
+#cat <<'DSKCHROMWD' > /usr/share/applications/chromium-spot.desktop
+#[Desktop Entry]
+#Name=Chromium-spot
+#GenericName=Web Browser
+#Comment=Access the Internet
+#Exec=/usr/local/bin/chromium-spot %U
+#StartupNotify=true
+#Terminal=false
+#Icon=chromium
+#Type=Application
+#Categories=Network;WebBrowser;
+#MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xhtml+xml;application/xhtml_xml;application/xml;image/gif;image/jpeg;image/png;image/webp;text/html;text/xml;x-scheme-handler/ftp;x-scheme-handler/http;x-scheme-handler/https;
+#Actions=new-window;new-private-window;
+#DSKCHROMWD
+#cat <<'CHROMIUMWD' > /usr/local/bin/chromium-spot
+#!/bin/bash
+# google-chrome script. Modified by wiak 10May2020
+# Copyright (c) 2011 The Chromium Authors. All rights reserved. Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
+#export CHROME_WRAPPER="`readlink -f "$0"`"
+#export GNOME_DISABLE_CRASH_DIALOG=SET_BY_GOOGLE_CHROME
+#exec < /dev/null
+#exec > >(exec cat)
+#exec 2> >(exec cat >&2)
+#if [ "$USER" == "root" ]  || [ "$LOGNAME" == "root" ];then  # wiak can use either of:
+#  exec -a "$0" chromium "$@" --no-sandbox --disable-infobars # ok, but unsupported warning appears (wiak)
+#  # xhost +local:; exec -a "$0" su spot -c "chromium "$@""  # But should xhost - when finished
+#else
+#  exec -a "$0" chromium  "$@"
+#fi
+#CHROMIUMWD
+#chmod +x /usr/local/bin/chromium-spot
+#cat <<'CHROMIUMTOG' > /usr/local/bin/chromium-toggle
+#!/bin/sh
+# chromium-toggle script. By wiak 10May2020. License MIT
+#file='chromium-spot'
+#patt='exec -a "$0" chromium "$@" --no-sandbox'
+#if grep -q "# ${patt}" "$file"; then sed -i "s/# ${patt}/${patt}/" "$file"; else sed -i "s/${patt}/# ${patt}/" "$file";fi
+#patt='xhost +local'
+#if grep -q "# ${patt}" "$file"; then sed -i "s/# ${patt}/${patt}/" "$file"; else sed -i "s/${patt}/# ${patt}/" "$file";fi
+#CHROMIUMTOG
+#chmod +x /usr/local/bin/chromium-toggle
+
+# Make defaultbrowser for pupdog apps and for xdg-settings use
+#ln -s /usr/local/bin/chromium-spot /usr/local/bin/defaultbrowser
+#xdg-settings set default-web-browser chromium-spot.desktop
+## end CHROMIUM BROWSER SETUP
+
+#-----------------------------------------------------------------------
+## INSTALL wd_exit for use by window manager menu or commandline
+cat <<'WDEXIT' > /usr/local/bin/wd_exit
+#!/bin/sh
+# WiakDistro_Exit, by wiak 14May2020; Revision 0.0.5 12Jun2020; Licence: MIT
+version="0.0.5"
+
+# Location variables. Some exported in case needed by later child GUI
+export PROGRAMNAME="wd_exit"
+export PROGRAMHOME="${HOME}"/.config/"${PROGRAMNAME}"
+CFG_NAME="wdexitrc"
+CONFIGFILE="${PROGRAMHOME}"/"${CFG_NAME}"
+plugin="$2"
+
+case "$1" in
+	'-h'|'--help'|'-?') printf "NOTE: The plugin must contain full code replacement of program section 
+'EXEMPLAR PLUGIN CODE START' up to 'EXEMPLAR PLUGIN CODE END' but
+should NOT have any #!/bin/sh header nor be made executable since it
+is simply a list of commands that will be 'sourced' by this
+main wd_exit wrapper script.
+
+IMPORTANT - the plugin code must be valid shell script commands or
+the program will fail. The default code used within wd_exit 
+'EXEMPLAR PLUGIN CODE' section is also an exemplar for any plugin code.
+
+## PLUGIN OPERATION:
+WD_EXIT precedence, highest to lowest, for section MAIN CODE actually 
+used, from options below is: 1, 2, 3, with existing internal code
+(option 4) being default but lowest precedence.
+
+The path of wd_exit.plug that optionally will be used is given by one of
+four methods, for user customisation flexibility:
+1. Second argument on commandline is given (this takes precedence over
+all the other determination methods).
+2. From existence of WDEXITPLUG environmental variable.
+3. From mere existence of plug file called wd_exit.plug in 
+${PROGRAMHOME}/plugins directory. You can always disable this plugin,
+at any time, by renaming it (for example, to NOwd_exit.plug).
+4. If none of the above, lowest precedence, is default code in this
+wd_exit wrapper script (which is for openbox_pcmanfm_systemd).
+
+For useful case 3 above, to be activated any WM_FM_INITSYSTEM.plug
+must be renamed to wd_exit.plug (e.g. using 'mv' command). 
+For example, if you have a wd_exit plugin named jwm_rox_systemd.plug it
+can be 'activated' using command: mv jwm_rox_systemd.plug wd_exit.plug
+or to keep original could simply activate a copy via command: 
+cp -a jwm_roxsystemd.plug wd_exit.plug
+
+## See above notes for optional plugin facility use.
+# Main script usage is:
+wd_exit <command> [optional_plugin_path]
+where command is: exitX|userswitch|autologin|restartX|reboot|poweroff\n";exit 0;;
+	'-v'|'--version') printf "WiakDistro_Exit. Version $version\n";exit 0;;
+	*) :;;
+esac
+
+# if CONFIGFILE exists use it (useful to set up wd_exit environment for different users)
+[ -e "$CONFIGFILE" ] && . "$CONFIGFILE" # e.g. might contain 'mv/rename' wd_exit.plug commands
+##-------------------------------------
+
+# MAIN
+if [ "$plugin" != "" ]; then
+	[ -s "${PROGRAMHOME}"/plugins/"${plugin}" ] && . "${PROGRAMHOME}"/plugins/"${plugin}" || { printf "No such plugin\n"; exit 1; }
+elif [ "$WDEXITPLUG" != "" ]; then
+	# use file name of plugin as stored in set env variable WDEXITPLUG
+	[ -s "${PROGRAMHOME}"/plugins/"${WDEXITPLUG}" ] && . "${PROGRAMHOME}"/plugins/"${WDEXITPLUG}" || { printf "No such plugin\n"; exit 1; }
+elif [ -s "${PROGRAMHOME}"/plugins/wd_exit.plug ]; then
+	[ -s "${PROGRAMHOME}"/plugins/wd_exit.plug ] && . "${PROGRAMHOME}"/plugins/wd_exit.plug || { printf "No such plugin\n"; exit 1; }
+else
+	# if no wd_exit.plug use default openbox_pcmanfm_systemd code below
+	
+########### EXEMPLAR PLUGIN CODE START #########################
+	menu="$1"; gettyowrite='/etc/systemd/system/getty@tty1.service.d/override.conf'
+
+	message(){
+		printf "Are you sure you want to ${1}?
+For NO, press Enter alone to Cancel.
+For YES, save or backup any work in progress you wish, and
+when ready to proceed, press any key followed by Enter: "
+		read choice
+		[ "$choice" == "" ] && exit 0
+	}
+	case "$menu" in
+		"exitX")		[ -e ~/.bash_profile ] && sed -i 's/exec startx/: # startx OFF/' ~/.bash_profile
+						message "exit X session"
+						killall -9 pcmanfm && { sleep 0.5; openbox --exit; }; exit 0;;
+		"userswitch")	if `grep -q 'root' "$gettyowrite"`;then
+							swuser="spot"
+							message "restart X session as user $swuser"
+							sudo sed -i 's/root/spot/' "$gettyowrite"
+						else
+							swuser="root"
+							message "restart X session as user $swuser"
+							sudo sed -i 's/spot/root/' "$gettyowrite"
+						fi
+						sudo systemctl daemon-reload
+						killall -9 pcmanfm && { sleep 0.5; openbox --exit; }; exit 0;;
+		"autologin")	if [ -e "$gettyowrite" ];then
+							sudo mv "$gettyowrite" "${gettyowrite}"OFF
+							printf "autologin is now OFF\n"
+						else 
+							sudo mv "${gettyowrite}"OFF "${gettyowrite}"
+							grep -q 'root' "$gettyowrite" && swuser="root" || swuser="spot"
+							printf "autologin $swuser is now ON\n"
+						fi
+						sudo systemctl daemon-reload
+						printf "Press Enter to close this window\n"
+						read;;
+		"restartX")	[ -e ~/.bash_profile ] && sed -i 's/: # startx OFF/exec startx/' ~/.bash_profile
+					message "restart X session according to autologin status"
+					killall -9 pcmanfm && { sleep 0.5; openbox --exit; }; exit 0;;
+		"reboot")	message "reboot your system"
+					sudo killall -9 pcmanfm && { sleep 0.5; systemctl reboot -i; }; exit 0;;
+		"poweroff")	message "shutdown and poweroff"
+					sudo killall -9 pcmanfm && { sleep 0.5; systemctl poweroff -i; }; exit 0;;
+		*) printf "\nusage: wd_exit [userswitch|autologin|restartX|reboot|poweroff]\nPress Enter key to continue "; read;;
+	esac
+########### EXEMPLAR PLUGIN CODE END #########################
+	# NOTE WELL that any wd_exit.plug code should simply contain replacement
+	# code for the lines between "EXEMPLAR PLUGIN CODE START" and "EXEMPLAR PLUGIN CODE END"
+fi
+exit 0
+WDEXIT
+chmod +x /usr/local/bin/wd_exit
+mkdir -p ~/.config/wd_exit/plugins  # run: wd_exit --help for optional plugin usage
+#-----------------------------------------------------------------------
+
+# Install wd_extract for right-click pcmanfm to extract
+# tar, tgz, tar.gz, txz, tar.xz, tar.zst, sfs, squashfs, and deb files
+cat <<'WDEXTRACT' > /usr/local/bin/wd_extract
+#!/bin/bash
+# WeeDog_Extract by wiak 31May20020; Revision 31May2020; Licence: MIT
+version="0.0.1"
+
+case "$1" in
+	'-h'|'--help'|'-?') printf "usage: wd_extract <filename-including-extension>
+Or use via pcmanfm right-click.
+The compressed file/package is extracted into a directory
+that has same name as the package but minus the extension.
+Extractors currently included for tar, tgz/tar.gz, txz/tar.xz, tar.bz2, 
+tar.zst, sfs/squashfs, deb\n";exit 0;;
+	'-v'|'--version') printf "WeeDog_Extract. Version $version\n";exit 0;;
+	*) :;;
+esac
+
+fullpath_pkg="$1"
+pkg_dir="`dirname "$fullpath_pkg"`"
+pkg="`basename "$fullpath_pkg"`"
+ext1="`printf "$pkg" | awk -F. 'NF>1 {print "."$NF}'`"
+ext2="`printf "$pkg" | awk -F. 'NF>2 {print "."$(NF-1)"."$NF}'`"
+ext1_extract_dirname=${pkg%*.*}
+ext2_extract_dirname=${pkg%*.*.*}
+
+end_message(){
+	printf "${1} extraction into ${pkg_dir}/${2} is complete\n"
+	exit 0
+}
+
+none_message(){  # extractor not coded in yet
+	printf "wd_extract has no extractor for package type ${1} yet\n"
+	exit 0
+}
+
+extract_deb(){
+	# already done a cd into relevant extract directory in foot code main
+	mkdir -p "${ext1_extract_dirname}"
+	sudo dpkg-deb -x "$fullpath_pkg" "${ext1_extract_dirname}"
+	sudo dpkg-deb -e "$fullpath_pkg" "${ext1_extract_dirname}"/DEBIAN
+	end_message "deb" "${ext1_extract_dirname}"
+}
+
+extract_sfs(){
+	unsquashfs -d "${ext1_extract_dirname}" "$fullpath_pkg"
+	end_message "$1" "${ext1_extract_dirname}"
+}
+
+extract_tar(){
+	# tar options "$fullpath_pkg" -C ext1_or_ext2_extract_dirname
+	# tar "$1" "$fullpath_pkg" -C "$2" (here, $3 is filetype for end message)
+	mkdir -p "$2"
+	tar "$1" "$fullpath_pkg" -C "$2"
+	end_message "$3" "$2"
+}
+
+# more extractors probably to come...
+
+cd "$pkg_dir"  # where original file is and where extraction directory is created
+case "${ext1}" in
+	'.deb') extract_deb;;
+	'.pet') extract_tar "xzvf" "${ext1_extract_dirname}" "pet";;
+	'.tgz') extract_tar "xzvf" "${ext1_extract_dirname}" "tgz";;  # for newer tar xvf alone would do
+	'.txz') extract_tar "xJvf" "${ext1_extract_dirname}" "txz";;
+	'.tar') extract_tar "xvf" "${ext1_extract_dirname}" "tar";;
+	'.sfs') extract_sfs "sfs";;
+	'.squashfs') extract_sfs "squashfs";;
+		*) :;;
+esac
+case "${ext2}" in
+	'.tar.gz') extract_tar "xzvf" "${ext2_extract_dirname}" "tar.gz";;
+	'.tar.xz') extract_tar "xJvf" "${ext2_extract_dirname}" "tar.xz";;
+	'.tar.bz2') extract_tar "xjvf" "${ext2_extract_dirname}" "tar.bz2";;
+	'.tar.zst') extract_tar "-I zstd -xvf" "${ext2_extract_dirname}" "tar.zst";;
+		*) none_message "other";;
+esac
+
+exit 0
+WDEXTRACT
+chmod +x /usr/local/bin/wd_extract
+#-----------------------------------------------------------------------
+
+# Install wd_light for backlight brightness control
+cat <<'WDLIGHT' > /usr/local/bin/wd_light
+#!/bin/sh
+# C wiak MIT
+# dependency: pacman -Sy light
+light -N 10
+light $1 $2
+exit 0
+WDLIGHT
+chmod +x /usr/local/bin/wd_light
+#-----------------------------------------------------------------------
+
+# Install wd_pactl for pa volume adjust
+cat <<'WDPACTL' > /usr/local/bin/wd_pactl
+#!/bin/sh
+# C wiak MIT
+psink=`pacmd list-sinks | awk '/ * index: / {printf "%s", $3}'`
+case $1 in
+  mutetoggle)
+    pactl set-sink-mute $psink toggle
+  ;;
+  up)
+    pactl set-sink-volume $psink +2%
+  ;;
+  down)
+    pactl set-sink-volume $psink -2%
+  ;;
+esac
+exit 0
+WDPACTL
+chmod +x /usr/local/bin/wd_pactl
+#-----------------------------------------------------------------------
+
+# Install wd_tog_xandr for xrandr Brightness - L:night_full, M:low, R:mid, W:Up/Down
+cat <<'WDTOGXRANDR' > /usr/local/bin/wd_tog_xandr
+#!/bin/sh
+# wiak mod of: 
+# https://askubuntu.com/questions/1003101/how-to-use-xrandr-gamma-for-gnome-night-light-like-usage
+# https://blog.onetwentyseven001.com/more-of-xrandr-or-blue-light-exposure/#.W2ExkRRKjb1
+bright_mode() { 
+  for disp in `xrandr | grep " connected " | awk '{ print$1 }'`; do 
+    xrandr --output $disp --gamma $1 --brightness $2 
+  done }
+
+mkdir -p /tmp/wd_toggles
+case $1 in 
+  full)
+    if [ -e /tmp/wd_toggles/tog_xandr_full ]; then
+      bright_mode 1:1:1 1.0
+      rm -f /tmp/wd_toggles/tog_xandr_full
+    else
+      bright_mode 1:1:0.5 0.7
+      touch /tmp/wd_toggles/tog_xandr_full
+    fi  
+  ;;
+  mid)
+    if [ -e /tmp/wd_toggles/tog_xandr_mid ]; then
+      bright_mode 1:1:1 0.7
+      rm -f /tmp/wd_toggles/tog_xandr_mid
+    else
+      bright_mode 1:1:1 0.5
+      touch /tmp/wd_toggles/tog_xandr_mid
+    fi  
+  ;;
+  low)
+  light -N 10
+#  light -S 20
+    if [ -e /tmp/wd_toggles/tog_xandr_low ]; then
+      bright_mode 1:1:1 0.25
+      rm -f /tmp/wd_toggles/tog_xandr_low
+    else
+      bright_mode 1:1:1 0.25
+      touch /tmp/wd_toggles/tog_xandr_low
+    fi
+  ;;
+  *)
+    if [ -e /tmp/wd_toggles/tog_xandr_other ]; then
+      bright_mode 1:1:1 1.0
+      rm -f /tmp/wd_toggles/tog_xandr_other
+    else
+      bright_mode 1:1:0.5 0.7
+      touch /tmp/wd_toggles/tog_xandr_other
+    fi
+  ;;
+esac
+exit 0
+WDTOGXRANDR
+chmod +x /usr/local/bin/wd_tog_xandr
+#-----------------------------------------------------------------------
+
+# Install wd_mount - simple fs mount utility
+cat <<'WDMOUNT' > /usr/local/bin/wd_mount
+#!/bin/sh
+# wd_mount: Simple... mount tool by wiak. Licence MIT. Created 12Apr2020. Rev 0.0.3 31Jan2023
+case "$1" in
+  '-h'|'--help'|'-?'|'') printf "usage: wd_mount <devicename> (e.g. wd_mount sdb1)>
+Simple mounttool to mount device to /media/root/devicename";exit;;
+esac
+_base="/media/root"  # thanks geo_c for the media/root Thunar research
+mkdir -p ${_base}/"${1}"
+mountpoint -q ${_base}/"${1}" || mount /dev/"${1}" ${_base}/"${1}"
+mount | grep "${1}"
+exit 0
+WDMOUNT
+chmod +x /usr/local/bin/wd_mount
+#-----------------------------------------------------------------------
+
+# Install default.script for udhcpc wiakwifi use
+mkdir -p /etc/udhcpc /usr/share/udhcpc
+cat <<'DEFAULT' > /etc/udhcpc/default.script
+#!/bin/sh
+# udhcpc script edited by Tim Riker <Tim@Rikers.org>
+# wiak modded with metric fix info from rockedge
+RESOLV_CONF="/etc/resolv.conf"
+
+[ -n "$1" ] || { echo "Error: should be called from udhcpc"; exit 1; }
+
+NETMASK=""
+if command -v ip >/dev/null; then
+	[ -n "$subnet" ] && NETMASK="/$subnet"
+else
+	[ -n "$subnet" ] && NETMASK="netmask $subnet"
+fi
+BROADCAST="broadcast +"
+[ -n "$broadcast" ] && BROADCAST="broadcast $broadcast"
+
+case "$1" in
+	deconfig)
+		echo "Clearing IP addresses on $interface, upping it"
+		if command -v ip >/dev/null; then
+			ip -4 addr flush dev $interface
+			ip link set dev $interface up
+		else
+			ifconfig $interface 0.0.0.0
+		fi
+		;;
+
+	renew|bound)
+		echo "Setting IP address $ip on $interface"
+		if command -v ip >/dev/null; then
+			ip addr add $ip$NETMASK $BROADCAST dev $interface
+		else
+			ifconfig $interface $ip $NETMASK $BROADCAST
+		fi
+
+		if [ -n "$router" ] ; then
+			echo "Deleting routers"
+			while route del default gw 0.0.0.0 dev $interface ; do
+				:
+			done
+
+			metric=0
+			for i in $router ; do
+				echo "Adding router $i"
+				if [ "$subnet" = "255.255.255.255" ]; then
+	# special case for /32 subnets:
+	# /32 instructs kernel to always use routing for all outgoing packets
+	# (they can never be sent to local subnet - there is no local subnet for /32).
+	# Used in datacenters, avoids the need for private ip-addresses between two hops.
+					ip route add $i dev $interface
+				fi
+				route add default gw $i dev $interface metric $metric; metric=$((metric+1))  # fix rockedge/wiak
+			done
+		fi
+
+		# If the file is a symlink somewhere (like /etc/resolv.conf
+		# pointing to /run/resolv.conf), make sure things work.
+		if test -L "$RESOLV_CONF"; then
+			# If it's a dangling symlink, try to create the target.
+			test -e "$RESOLV_CONF" || touch "$RESOLV_CONF"
+		fi
+		realconf=$(readlink -f "$RESOLV_CONF" 2>/dev/null || echo "$RESOLV_CONF")
+		echo "Recreating $realconf"
+		tmpfile="$realconf-$$"
+		> "$tmpfile"
+		[ -n "$domain" ] && echo "search $domain" >> "$tmpfile"
+		for i in $dns ; do
+			echo " Adding DNS server $i"
+			echo "nameserver $i" >> "$tmpfile"
+		done
+		mv "$tmpfile" "$realconf"
+		;;
+esac
+
+exit 0
+DEFAULT
+chmod +x /etc/udhcpc/default.script
+cp -a /etc/udhcpc/default.script /usr/share/udhcpc
+#-----------------------------------------------------------------------
+
+# Install wiakwifi - simple busybox udhcpc WPA network manager
+cat <<'WIAKWIFI' > /usr/local/bin/wiakwifi
+#!/bin/sh
+# wiakwifi: Simple... wifi connect 
+# Copyright William McEwan (wiak) 14Jun2020+ Licence MIT 
+# Created Jun2020; Revised 26feb2022
+progname="wiakwifi"; version=0.0.5; revision=-rc1
+printf "###########You are logged in as USER: %s###########\n" `logname`
+
+if [ "$USER" != "root" ]  || [ "$LOGNAME" != "root" ];then
+	printf "
+You need root user rights to use this utility.
+
+Press Enter to exit this message
+"
+	read
+fi
+# Uncomment the following line if network interfaces need time to become ready
+#printf "Configuring network interfaces. Please wait...\n"; sleep 1
+wpa_driver=""
+# wifi_driver="nl80211"  # uncomment if specific required
+# wifi_driver="wext"
+# wpa_driver="-D${wifi_driver}"  # uncomment if specific required
+case "$1" in
+	'-v'|'--version') printf "$progname ${version}${revision}\n"; exit 0;;
+	'-h'|'--help'|'-?') printf "usage: wiakwifi [reset]\nreset clears existing wifi config\n";exit 0;;
+	'reset') printf "\nAre you sure you want to Reset Internet Connection Settings?
+For NO, press Enter alone to Cancel.
+For YES, press any key followed by Enter: "
+			read choice
+			[ "$choice" = "" ] && exit 0
+			rm -f /root/.wiakwifirc /etc/wpa_supplicant/wpa_supplicant_wdog01.conf;;
+	'reconnect') printf "\nAre you sure you want to Reconnect To Internet?
+For NO, press Enter alone to Cancel.
+For YES, press any key followed by Enter: "
+			read choice
+			[ "$choice" = "" ] && exit 0;;
+esac
+wi_face=""
+[ -s /root/.wiakwifirc ] && . /root/.wiakwifirc 2>/dev/null
+printf "\n"
+if [ "$wi_face" = "" ];then
+	ip link | sed 's/lo:.*/Interface Names->/;/loopback/d;/link/d;s/[1-9]://;s/://;s/<.*//'
+	printf "\nEnter interface name chosen from above for connection: \n"; read wi_face
+	printf "Enter wifi network (SSID) or just press Enter if ethernet: \n"; read wi_ssid
+	printf "Enter wifi password (NONE for Open Network)\nor just press Enter if ethernet: \n"; read wi_key
+	echo "wi_face=\""$wi_face"\"" > /root/.wiakwifirc
+	echo "wi_ssid=\""$wi_ssid"\"" >> /root/.wiakwifirc
+	echo "wi_key=\""$wi_key"\"" >> /root/.wiakwifirc
+fi
+if [ "$wi_ssid" != "" ];then
+	if [ ! -s /etc/wpa_supplicant/wpa_supplicant_wdog01.conf ]; then
+		cp -a /etc/wpa_supplicant/wpa_supplicant.conf /etc/wpa_supplicant/wpa_supplicant_wdog01.conf 2>/dev/null 
+		if [ "$wi_key" != "NONE" ];then
+			wpa_passphrase "$wi_ssid" "$wi_key" >>/etc/wpa_supplicant/wpa_supplicant_wdog01.conf
+		else
+cat > /etc/wpa_supplicant/wpa_supplicant_wdog01.conf << EOF
+network={
+	ssid="$wi_ssid"
+	key_mgmt="$wi_key"
+}
+EOF
+	fi
+	[ -e /tmp/wpaPID ] && kill `</tmp/wpaPID` 2>/dev/null
+	killall wpa_supplicant 2>/dev/null  # reluctant...sojust to make sure
+	sleep 1
+	wpa_supplicant -i "$wi_face" "$wpa_driver" -c /etc/wpa_supplicant/wpa_supplicant_wdog01.conf -B -P /tmp/wpaPID
+fi
+[ -e /tmp/udhcpcPID ] && kill `</tmp/udhcpcPID` 2>/dev/null
+udhcpc -i "$wi_face" -p /tmp/udhcpcPID
+[ $? -eq 0 ] && printf "\n###########Connected to $wi_face $wi_ssid###########\n"
+sleep 1
+exit 0
+WIAKWIFI
+chmod +x /usr/local/bin/wiakwifi
+#-----------------------------------------------------------------------
+
+# Install wd_saveRAM1 for w_changes=RAM1 save persistence
+cat <<'WDSAVERAM1' > /usr/local/bin/wd_saveRAM1
+#!/bin/sh
+...
+WDSAVERAM1
+chmod +x /usr/local/bin/wd_saveRAM1
+#-----------------------------------------------------------------------
+
+# Install wd_timezone changer
+cat <<'WDTIMEZONE' > /usr/local/bin/wd_timezone
+#!/bin/sh
+# wd_timezone: Set timezone
+# Copyright William McEwan (wiak) 29Jan2023+ Licence MIT 
+# Created 29Jan2023; Revised 29Jan2023
+# fredx181, 13Mar2023, use list for yad gui
+progname="wd_timezone"; version=0.0.1; revision=-rc1
+
+case "$1" in
+  '-v'|'--version') printf "$progname ${version}${revision}\n"; exit 0;;
+  '-h'|'--help'|'-?') printf "Set timezone. Usage:
+Execute: wd_timezone (then set timezone)\n";exit 0;;
+esac
+
+_tzones="`timedatectl list-timezones | xargs`"
+
+_result=`yad --title="Set Timezone" --center --on-top \
+--image-on-top \
+--image=/usr/share/pixmaps/timezone-icon.svg \
+--text="Choose timezone" \
+--text-align=center \
+--separator=" " \
+--height=400 --width=300 --list --editable --column Timezone $_tzones`
+
+_timezone=`printf "$_result" | cut -d" " -f1`
+
+# Set timezone
+timedatectl set-timezone "$_timezone"
+exit 0
+WDTIMEZONE
+chmod +x /usr/local/bin/wd_timezone
+cat <<'WDTIMEZONEDESKTOP' > /usr/share/applications/wd_timezone.desktop
+[Desktop Entry]
+Name=Timezone
+GenericName=wd_timezone
+Comment=Set Timezone
+Exec=/usr/local/bin/wd_timezone
+Terminal=false
+Icon=/usr/share/pixmaps/timezone-icon.svg
+Type=Application
+Categories=Settings;DesktopSettings;
+WDTIMEZONEDESKTOP
+#-----------------------------------------------------------------------
+
+# The following may need updated for newer glibc versions?
+wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/optional/user_utils/giblib-1.0.6.tar.xz -O /giblib-1.0.6.tar.xz
+tar xJf /giblib-1.0.6.tar.xz && rm /giblib-1.0.6.tar.xz
+wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/optional/user_utils/wex_scrox64_gifenc_precord.tar.xz -O /wex.tar.xz
+tar xJf /wex.tar.xz && rm /wex.tar.xz
+wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/optional/user_utils/pextras.tar.xz -O /pextras.tar.xz
+tar xJf /pextras.tar.xz && rm /pextras.tar.xz
+wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/optional/system_scripts/run-as-firstrib -O /usr/local/bin/run-as-firstrib
+chmod +x /usr/local/bin/run-as-firstrib
+wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/optional/system_scripts/run-as-spot -O /usr/local/bin/run-as-spot
+chmod +x /usr/local/bin/run-as-spot
+wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/core_resources/save2flash_fr-latest.tar.xz -O /save2flash_fr-latest.tar.xz
+tar xJf /save2flash_fr-latest.tar.xz && rm /save2flash_fr-latest.tar.xz
+# wget -c https://gitlab.com/firstrib/firstrib/-/raw/master/latest/core_resources/trizen-1_1.67-1.tar.xz -O /trizen-1_1.67-1.tar.xz
+# tar xJf /trizen-1_1.67-1.tar.xz && rm /trizen-1_1.67-1.tar.xz
+#-----------------------------------------------------------------------
+
+## Create and switch to build directory
+cd /var/cache/pacman/pkg
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/libpamac-aur-11.6.4-1-x86_64.pkg.tar.zst 
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/pamac-aur-11.7.1-4-x86_64.pkg.tar.zst
+wget ‐c https://archive.org/download/archlinux_pkg_rox/rox-2.11-7-x86_64.pkg.tar.zst
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/libtiff5-4.4.0-2-x86_64.pkg.tar.zst
+wget -c https://builds.garudalinux.org/repos/chaotic-aur/x86_64/gtkhash-1.5-3-x86_64.pkg.tar.zst
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/gdmap-0.8.1-7-x86_64.pkg.tar.zst
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/usbimager-1.0.9-1-x86_64.pkg.tar.zst
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/xidlehook/xidlehook-0.10.0-1-x86_64.pkg.tar.zst
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/hardinfo-0.5.1.816.g877ea2b-2.2-x86_64.pkg.tar.zst
+wget -c https://gitlab.com/sofija.p2018/kla-ot2/-/raw/main/fzf-extras-0.3.1-1-any.pkg.tar.zst
+echo libpamac-aur-11.6.4-1-x86_64.pkg.tar.zst pamac-aur-11.7.1-4-x86_64.pkg.tar.zst \
+rox-2.11-7-x86_64.pkg.tar.zst libtiff5-4.4.0-2-x86_64.pkg.tar.zst \
+gtkhash-1.5-3-x86_64.pkg.tar.zst gdmap-0.8.1-7-x86_64.pkg.tar.zst \
+usbimager-1.0.9-1-x86_64.pkg.tar.zst xidlehook-0.10.0-1-x86_64.pkg.tar.zst \
+hardinfo-0.5.1.816.g877ea2b-2.2-x86_64.pkg.tar.zst \
+fzf-extras-0.3.1-1-any.pkg.tar.zst \
+| xargs -n1 pacman -U --noconfirm --needed --disable-download-timeout
+
+### END usrlocalbin scripts---------------------------------------------
+#-----------------------------------------------------------------------
+
+## USER CONFIGS: Copy main configs to /etc/skel for all normal users later added
+cp -af /root/. /etc/skel
+mkdir -p /etc/skel/.config/systemd/user/default.target.wants /etc/skel/.config/systemd/user/sockets.target.wants
+# enable systemd pulseaudio.service in /etc/skel for new users added 
+ln -s /usr/lib/systemd/user/pulseaudio.service /etc/skel/.config/systemd/user/default.target.wants/pulseaudio.service
+ln -s /usr/lib/systemd/user/pulseaudio.socket /etc/skel/.config/systemd/user/sockets.target.wants/pulseaudio.socket
+
+# Give wheel group nopasswd sudo rights and create firstrib as wheel group member
+# PREV (was wrong I think...): groupadd sudo && 
+echo '%wheel ALL=(ALL) NOPASSWD: ALL' | (VISUAL="tee -a" visudo) # wheel group added to sudo no password required
+useradd -m -G wheel -s /bin/bash firstrib  # firstrib in wheel group so has elevated sudo permissions
+printf "firstrib\nfirstrib" | passwd firstrib >/dev/null 2>&1 # Quietly set default firstrib passwd to "firstrib"
+update-mime-database /home/firstrib/.local/share/mime  # not sure if required
+update-desktop-database -v /home/firstrib/.local/share/applications  # not sure if required
+
+# Give wheel group nopasswd sudo rights and create spot as wheel group member
+# PREV (was wrong I think...): groupadd sudo && 
+echo '%wheel ALL=(ALL) NOPASSWD: ALL' | (VISUAL="tee -a" visudo) # wheel group added to sudo no password required
+useradd -m -G wheel -s /bin/bash spot  # spot in wheel group so has elevated sudo permissions
+printf "spot\nspot" | passwd spot >/dev/null 2>&1 # Quietly set default spot passwd to "spot"
+update-mime-database /home/spot/.local/share/mime  # not sure if required
+update-desktop-database -v /home/spot/.local/share/applications  # not sure if required
+##----------------------------------------------------------------------
+# EXTRAS PLUGIN:
+# If f_01.plug exists in the original boot directory (or fifth argument
+# to build_firstrib_rootfs script gives f_plugin filename to use,
+# the shell commandlines in it will now be automatically sourced.
+# Note that filename for all build_firstrib plugins must begin with f_
+
+# For lots of good tips on configuring openbox, pcmanfm, tint2 refer to:
+# http://lxlinux.com and https://www.mankier.com/1/pcmanfm
+# https://petermolnar.net/hacking-tint2-panel-weather-cpu-temperature-and-volume-executors/
+# You can add as many other valid commandlines as you want immediately below here:
+
+# Restore busybox network-related links if required
+# If required the following should, I think, be done at very end of 
+# plugin to avoid conflicts with any pacman network-related app installs
+cd /usr/bin; ln -s busybox ip; ln -s busybox route; ln -s busybox ifconfig; ln -s busybox arp; ln -s busybox ping; ln -s busybox udhcpc
+cd ../..
+
+# Empty pacman pkg cache
+printf "%s\n%s\n" y y | pacman -Scc
+
+# Avahi-daemon autostart
+# enable systemd avahi-daemon.service / avahi-daemon.socket / dbus-org.freedesktop.Avahi.service
+ln -s /usr/lib/systemd/system/avahi-daemon.service /etc/systemd/system/multi-user.target.wants/
+ln -s /usr/lib/systemd/system/avahi-daemon.service /etc/systemd/system/dbus-org.freedesktop.Avahi.service
+mkdir -p /etc/systemd/system/sockets.target.wants
+ln -s /usr/lib/systemd/system/avahi-daemon.socket /etc/systemd/system/sockets.target.wants/
+
+# Pulseaudio.service / pulseaudio.socket enable - (systemctl --user enable pulseaudio.service)
+mkdir -p /root/.config/systemd/user/default.target.wants
+ln -s /usr/lib/systemd/user/pulseaudio.service /root/.config/systemd/user/default.target.wants/
+mkdir -p /root/.config/systemd/user/sockets.target.wants
+ln -s /usr/lib/systemd/user/pulseaudio.socket /root/.config/systemd/user/sockets.target.wants/
+
+# Bluetooth (systemctl enable bluetooth)
+# add blueman to autostart and activate systemd bluetooth module
+ln -s /usr/lib/systemd/system/bluetooth.service /etc/systemd/system/dbus-org.bluez.service
+mkdir -p /etc/systemd/system/bluetooth.target.wants
+ln -s /usr/lib/systemd/system/bluetooth.service /etc/systemd/system/bluetooth.target.wants/bluetooth.service 
+
+# systemctl enable sfs-load-run  /  systemctl enable sfs-load-finish
+ln -s /usr/lib/systemd/system/sfs-load-run.service /etc/systemd/system/multi-user.target.wants/sfs-load-run.service
+mkdir -p /etc/systemd/system/final.target.wants
+ln -s /usr/lib/systemd/system/sfs-load-finish.service /etc/systemd/system/final.target.wants/sfs-load-finish.service
+
+# systemctl enable saveatshutdown.service
+ln -s /usr/lib/systemd/system/saveatshutdown.service /etc/systemd/system/multi-user.target.wants/saveatshutdown.service
+
+# systemctl enable unscd.service 
+# ln -s /usr/lib/systemd/system/unscd.service /etc/systemd/system/multi-user.target.wants/unscd.service 
+
+# Enable lightdm (systemctl enable lightdm)-(lightdm-gtk-greeter-settings )
+# ln -s /usr/lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
+
+# TIMEZONE SETUP
+# enable systemd systemd-timesyncd.service
+mkdir -p /etc/systemd/system/sysinit.target.wants
+ln -s /usr/lib/systemd/system/systemd-timesyncd.service /etc/systemd/system/sysinit.target.wants/systemd-timesyncd.service
+current_timezone="Etc/UTC"
+ln -sf /usr/share/zoneinfo/${current_timezone} /etc/localtime
+printf "\nCurrent timezone is: %s\n" ${current_timezone}
+printf "To change timezone, open a terminal and enter the command: tzselect\n"
