@@ -2,7 +2,7 @@
 
 ![2023-08-21_750x422-thumb](https://github.com/sofijacom/KLA-OT2baseCE/assets/107557749/45ea5dae-f396-438b-a08f-12ad56edceb2)
 
-# Assembly of KLA-OT2baseCE
+# 💞 Assembly of KLA-OT2baseCE 💞
 
 1) Create a folder `KLA-OT2baseCE` typing in the terminal `mkdir -p KLA-OT2baseCE`
 
