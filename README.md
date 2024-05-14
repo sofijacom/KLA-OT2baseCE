@@ -47,3 +47,7 @@ Example of using a .plug file:
 ***f_00_Arch_amd64-openboxBASE_jgmenu_600r5.plug***  builds a  ***(root filesystem)***  for the Arch Linux-based Openbox desktop operating system, similar to **KLA-OT2baseCE**.
 
 To create a complete distribution, all other utilities, tools and configurations are downloaded from a centralized repository and installed as a .tar.gz file.
+
+<p align="center">	
+  <img src="https://github.com/sofijacom/sofijacom/blob/main/gray0_ctp_on_line.svg?sanitize=true" />
+</p>
